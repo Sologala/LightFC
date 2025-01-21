@@ -61,20 +61,22 @@ class lightFC(BaseTracker):
             x_dict = search
             out_dict = self.network.forward_tracking(z_feat=self.z_feat, x=x_dict.tensors)
 
-        response_origin = self.output_window * out_dict['score_map']
+        response_origin = self.output_window * out_dict["score_map"]
 
-        pred_box_origin = self.compute_box(response_origin, out_dict,
-                                           resize_factor).tolist()  # .unsqueeze(dim=0)  # tolist()
+        pred_box, score = self.compute_box(response_origin, out_dict, resize_factor)
+        pred_box_origin = pred_box.tolist()  # .unsqueeze(dim=0)  # tolist()
 
         self.state = clip_box(self.map_box_back(pred_box_origin, resize_factor), H, W, margin=2)
 
-        return {"target_bbox": self.state}
+        return {"target_bbox": self.state, "score": score}
 
     def compute_box(self, response, out_dict, resize_factor):
-        pred_boxes = self.network.head.cal_bbox(response, out_dict['size_map'], out_dict['offset_map'])
+        pred_boxes, score = self.network.head.cal_bbox(
+            response, out_dict["size_map"], out_dict["offset_map"], return_score=True
+        )
         pred_boxes = pred_boxes.view(-1, 4)
         pred_boxes = (pred_boxes.mean(dim=0) * self.params.search_size / resize_factor)
-        return pred_boxes
+        return pred_boxes, score
 
     def map_box_back(self, pred_box: list, resize_factor: float):
         cx_prev, cy_prev = self.state[0] + 0.5 * self.state[2], self.state[1] + 0.5 * self.state[3]
