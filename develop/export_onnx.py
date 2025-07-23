@@ -33,7 +33,7 @@ class Detection(nn.Module):
         self.net.load_state_dict(torch.load(params.checkpoint, map_location="cpu")["net"], strict=True)
 
     def forward(self, z, x):
-        return self.net.forward_tracking(z, x)
+        return self.net.forward_tracking_export_onnx(z, x)
 
 
 def export_backone(params, export_onnx_path):
@@ -69,7 +69,7 @@ def export_detection(params, export_onnx_path):
     dummy_z = torch.randn([1, 96, 8, 8])
 
     input_names = ["img", "z"]
-    output_names = ["box", "score_map", "size_map", "offset_map"]
+    output_names = ["score_map", "size_map", "offset_map"]
 
     torch.onnx.export(
         model,

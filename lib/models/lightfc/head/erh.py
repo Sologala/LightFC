@@ -4,34 +4,68 @@ import torch.nn as nn
 from torchvision.ops import FrozenBatchNorm2d
 
 
-def conv_center_head(in_planes, out_planes, kernel_size=3, stride=1, padding=1, dilation=1,
-                     freeze_bn=False):
+def conv_center_head(in_planes, out_planes, kernel_size=3, stride=1, padding=1, dilation=1, freeze_bn=False):
     if freeze_bn:
         return nn.Sequential(
-            nn.Conv2d(in_planes, out_planes, kernel_size=kernel_size, stride=stride,
-                      padding=padding, dilation=dilation, bias=True),
+            nn.Conv2d(
+                in_planes,
+                out_planes,
+                kernel_size=kernel_size,
+                stride=stride,
+                padding=padding,
+                dilation=dilation,
+                bias=True,
+            ),
             FrozenBatchNorm2d(out_planes),
-            nn.ReLU(inplace=True))
+            nn.ReLU(inplace=True),
+        )
     else:
         return nn.Sequential(
-            nn.Conv2d(in_planes, out_planes, kernel_size=kernel_size, stride=stride,
-                      padding=padding, dilation=dilation, bias=True),
+            nn.Conv2d(
+                in_planes,
+                out_planes,
+                kernel_size=kernel_size,
+                stride=stride,
+                padding=padding,
+                dilation=dilation,
+                bias=True,
+            ),
             nn.BatchNorm2d(out_planes),
-            nn.ReLU(inplace=True))
+            nn.ReLU(inplace=True),
+        )
 
 
 def conv_bn_rep(in_channels, out_channels, kernel_size, stride, padding, groups=1):
     result = nn.Sequential()
-    result.add_module('conv', nn.Conv2d(in_channels=in_channels, out_channels=out_channels,
-                                        kernel_size=kernel_size, stride=stride, padding=padding, groups=groups,
-                                        bias=True))
-    result.add_module('bn', nn.BatchNorm2d(num_features=out_channels))
+    result.add_module(
+        "conv",
+        nn.Conv2d(
+            in_channels=in_channels,
+            out_channels=out_channels,
+            kernel_size=kernel_size,
+            stride=stride,
+            padding=padding,
+            groups=groups,
+            bias=True,
+        ),
+    )
+    result.add_module("bn", nn.BatchNorm2d(num_features=out_channels))
     return result
 
 
 class repN33(nn.Module):
-    def __init__(self, in_channels, out_channels, kernel_size=3,
-                 stride=1, padding=1, dilation=1, groups=1, padding_mode='zeros', deploy=False):
+    def __init__(
+        self,
+        in_channels,
+        out_channels,
+        kernel_size=3,
+        stride=1,
+        padding=1,
+        dilation=1,
+        groups=1,
+        padding_mode="zeros",
+        deploy=False,
+    ):
         super().__init__()
 
         self.deploy = deploy
@@ -46,17 +80,37 @@ class repN33(nn.Module):
         # padding_11 = padding - kernel_size // 2
 
         if deploy:
-            self.rbr_reparam = nn.Conv2d(in_channels=in_channels, out_channels=out_channels, kernel_size=kernel_size,
-                                         stride=stride, padding=padding, dilation=dilation, groups=groups, bias=True,
-                                         padding_mode=padding_mode)
+            self.rbr_reparam = nn.Conv2d(
+                in_channels=in_channels,
+                out_channels=out_channels,
+                kernel_size=kernel_size,
+                stride=stride,
+                padding=padding,
+                dilation=dilation,
+                groups=groups,
+                bias=True,
+                padding_mode=padding_mode,
+            )
         else:
-            self.rbr_dense = conv_bn_rep(in_channels=in_channels, out_channels=out_channels, kernel_size=kernel_size,
-                                         stride=stride, padding=padding, groups=groups)
-            self.rbr_3x3 = conv_bn_rep(in_channels=in_channels, out_channels=out_channels, kernel_size=3, stride=stride,
-                                       padding=padding, groups=groups)
+            self.rbr_dense = conv_bn_rep(
+                in_channels=in_channels,
+                out_channels=out_channels,
+                kernel_size=kernel_size,
+                stride=stride,
+                padding=padding,
+                groups=groups,
+            )
+            self.rbr_3x3 = conv_bn_rep(
+                in_channels=in_channels,
+                out_channels=out_channels,
+                kernel_size=3,
+                stride=stride,
+                padding=padding,
+                groups=groups,
+            )
 
     def forward(self, inputs):
-        if hasattr(self, 'rbr_reparam'):
+        if hasattr(self, "rbr_reparam"):
             return self.nonlinearity(self.rbr_reparam(inputs))
 
         return self.nonlinearity(self.rbr_dense(inputs) + self.rbr_3x3(inputs))
@@ -64,17 +118,24 @@ class repN33(nn.Module):
     def get_custom_L2(self):
         K3 = self.rbr_dense.conv.weight
         K1 = self.rbr_3x3.conv.weight
-        t3 = (self.rbr_dense.bn.weight / ((self.rbr_dense.bn.running_var + self.rbr_dense.bn.eps).sqrt())).reshape(-1,
-                                                                                                                   1, 1,
-                                                                                                                   1).detach()
-        t1 = (self.rbr_3x3.bn.weight / ((self.rbr_3x3.bn.running_var + self.rbr_3x3.bn.eps).sqrt())).reshape(-1, 1, 1,
-                                                                                                             1).detach()
+        t3 = (
+            (self.rbr_dense.bn.weight / ((self.rbr_dense.bn.running_var + self.rbr_dense.bn.eps).sqrt()))
+            .reshape(-1, 1, 1, 1)
+            .detach()
+        )
+        t1 = (
+            (self.rbr_3x3.bn.weight / ((self.rbr_3x3.bn.running_var + self.rbr_3x3.bn.eps).sqrt()))
+            .reshape(-1, 1, 1, 1)
+            .detach()
+        )
 
-        l2_loss_circle = (K3 ** 2).sum() - (K3[:, :, 1:2,
-                                            1:2] ** 2).sum()  # The L2 loss of the "circle" of weights in 3x3 kernel. Use regular L2 on them.
+        l2_loss_circle = (K3**2).sum() - (
+            K3[:, :, 1:2, 1:2] ** 2
+        ).sum()  # The L2 loss of the "circle" of weights in 3x3 kernel. Use regular L2 on them.
         eq_kernel = K3[:, :, 1:2, 1:2] * t3 + K1 * t1  # The equivalent resultant central point of 3x3 kernel.
-        l2_loss_eq_kernel = (eq_kernel ** 2 / (
-                t3 ** 2 + t1 ** 2)).sum()  # Normalize for an L2 coefficient comparable to regular L2.
+        l2_loss_eq_kernel = (
+            eq_kernel**2 / (t3**2 + t1**2)
+        ).sum()  # Normalize for an L2 coefficient comparable to regular L2.
         return l2_loss_eq_kernel + l2_loss_circle
 
     def get_equivalent_kernel_bias(self):
@@ -94,7 +155,7 @@ class repN33(nn.Module):
             eps = branch.bn.eps
         else:
             assert isinstance(branch, nn.BatchNorm2d)
-            if not hasattr(self, 'id_tensor'):
+            if not hasattr(self, "id_tensor"):
                 input_dim = self.in_channels // self.groups
                 kernel_value = np.zeros((self.in_channels, input_dim, 3, 3), dtype=np.float32)
                 for i in range(self.in_channels):
@@ -111,28 +172,44 @@ class repN33(nn.Module):
         return kernel * t, beta - running_mean * gamma / std
 
     def switch_to_deploy(self):
-        if hasattr(self, 'rbr_reparam'):
+        if hasattr(self, "rbr_reparam"):
             return
         kernel, bias = self.get_equivalent_kernel_bias()
-        self.rbr_reparam = nn.Conv2d(in_channels=self.rbr_dense.conv.in_channels,
-                                     out_channels=self.rbr_dense.conv.out_channels,
-                                     kernel_size=self.rbr_dense.conv.kernel_size, stride=self.rbr_dense.conv.stride,
-                                     padding=self.rbr_dense.conv.padding, dilation=self.rbr_dense.conv.dilation,
-                                     groups=self.rbr_dense.conv.groups, bias=True)
+        self.rbr_reparam = nn.Conv2d(
+            in_channels=self.rbr_dense.conv.in_channels,
+            out_channels=self.rbr_dense.conv.out_channels,
+            kernel_size=self.rbr_dense.conv.kernel_size,
+            stride=self.rbr_dense.conv.stride,
+            padding=self.rbr_dense.conv.padding,
+            dilation=self.rbr_dense.conv.dilation,
+            groups=self.rbr_dense.conv.groups,
+            bias=True,
+        )
         self.rbr_reparam.weight.data = kernel
         self.rbr_reparam.bias.data = bias
-        self.__delattr__('rbr_dense')
-        self.__delattr__('rbr_3x3')
-        if hasattr(self, 'rbr_identity'):
-            self.__delattr__('rbr_identity')
-        if hasattr(self, 'id_tensor'):
-            self.__delattr__('id_tensor')
+        self.__delattr__("rbr_dense")
+        self.__delattr__("rbr_3x3")
+        if hasattr(self, "rbr_identity"):
+            self.__delattr__("rbr_identity")
+        if hasattr(self, "id_tensor"):
+            self.__delattr__("id_tensor")
         self.deploy = True
 
 
 class repN31(nn.Module):
-    def __init__(self, in_channels, out_channels, kernel_size=3, stride=1, padding=1, dilation=1, groups=1,
-                 padding_mode='zeros', deploy=False, nonlinearity=nn.ReLU):
+    def __init__(
+        self,
+        in_channels,
+        out_channels,
+        kernel_size=3,
+        stride=1,
+        padding=1,
+        dilation=1,
+        groups=1,
+        padding_mode="zeros",
+        deploy=False,
+        nonlinearity=nn.ReLU,
+    ):
         super().__init__()
 
         self.deploy = deploy
@@ -147,17 +224,37 @@ class repN31(nn.Module):
         # padding_11 = padding - kernel_size // 2
 
         if deploy:
-            self.rbr_reparam = nn.Conv2d(in_channels=in_channels, out_channels=out_channels, kernel_size=kernel_size,
-                                         stride=stride, padding=padding, dilation=dilation, groups=groups, bias=True,
-                                         padding_mode=padding_mode)
+            self.rbr_reparam = nn.Conv2d(
+                in_channels=in_channels,
+                out_channels=out_channels,
+                kernel_size=kernel_size,
+                stride=stride,
+                padding=padding,
+                dilation=dilation,
+                groups=groups,
+                bias=True,
+                padding_mode=padding_mode,
+            )
         else:
-            self.rbr_dense = conv_bn_rep(in_channels=in_channels, out_channels=out_channels, kernel_size=kernel_size,
-                                         stride=stride, padding=padding, groups=groups)
-            self.rbr_3x3 = conv_bn_rep(in_channels=in_channels, out_channels=out_channels, kernel_size=1, stride=stride,
-                                       padding=padding, groups=groups)
+            self.rbr_dense = conv_bn_rep(
+                in_channels=in_channels,
+                out_channels=out_channels,
+                kernel_size=kernel_size,
+                stride=stride,
+                padding=padding,
+                groups=groups,
+            )
+            self.rbr_3x3 = conv_bn_rep(
+                in_channels=in_channels,
+                out_channels=out_channels,
+                kernel_size=1,
+                stride=stride,
+                padding=padding,
+                groups=groups,
+            )
 
     def forward(self, inputs):
-        if hasattr(self, 'rbr_reparam'):
+        if hasattr(self, "rbr_reparam"):
             return self.nonlinearity(self.rbr_reparam(inputs))
 
         return self.nonlinearity(self.rbr_dense(inputs) + self.rbr_3x3(inputs))
@@ -165,17 +262,24 @@ class repN31(nn.Module):
     def get_custom_L2(self):
         K3 = self.rbr_dense.conv.weight
         K1 = self.rbr_3x3.conv.weight
-        t3 = (self.rbr_dense.bn.weight / ((self.rbr_dense.bn.running_var + self.rbr_dense.bn.eps).sqrt())).reshape(-1,
-                                                                                                                   1, 1,
-                                                                                                                   1).detach()
-        t1 = (self.rbr_3x3.bn.weight / ((self.rbr_3x3.bn.running_var + self.rbr_3x3.bn.eps).sqrt())).reshape(-1, 1, 1,
-                                                                                                             1).detach()
+        t3 = (
+            (self.rbr_dense.bn.weight / ((self.rbr_dense.bn.running_var + self.rbr_dense.bn.eps).sqrt()))
+            .reshape(-1, 1, 1, 1)
+            .detach()
+        )
+        t1 = (
+            (self.rbr_3x3.bn.weight / ((self.rbr_3x3.bn.running_var + self.rbr_3x3.bn.eps).sqrt()))
+            .reshape(-1, 1, 1, 1)
+            .detach()
+        )
 
-        l2_loss_circle = (K3 ** 2).sum() - (K3[:, :, 1:2,
-                                            1:2] ** 2).sum()  # The L2 loss of the "circle" of weights in 3x3 kernel. Use regular L2 on them.
+        l2_loss_circle = (K3**2).sum() - (
+            K3[:, :, 1:2, 1:2] ** 2
+        ).sum()  # The L2 loss of the "circle" of weights in 3x3 kernel. Use regular L2 on them.
         eq_kernel = K3[:, :, 1:2, 1:2] * t3 + K1 * t1  # The equivalent resultant central point of 3x3 kernel.
-        l2_loss_eq_kernel = (eq_kernel ** 2 / (
-                t3 ** 2 + t1 ** 2)).sum()  # Normalize for an L2 coefficient comparable to regular L2.
+        l2_loss_eq_kernel = (
+            eq_kernel**2 / (t3**2 + t1**2)
+        ).sum()  # Normalize for an L2 coefficient comparable to regular L2.
         return l2_loss_eq_kernel + l2_loss_circle
 
     def get_equivalent_kernel_bias(self):
@@ -195,7 +299,7 @@ class repN31(nn.Module):
             eps = branch.bn.eps
         else:
             assert isinstance(branch, nn.BatchNorm2d)
-            if not hasattr(self, 'id_tensor'):
+            if not hasattr(self, "id_tensor"):
                 input_dim = self.in_channels // self.groups
                 kernel_value = np.zeros((self.in_channels, input_dim, 3, 3), dtype=np.float32)
                 for i in range(self.in_channels):
@@ -212,22 +316,27 @@ class repN31(nn.Module):
         return kernel * t, beta - running_mean * gamma / std
 
     def switch_to_deploy(self):
-        if hasattr(self, 'rbr_reparam'):
+        if hasattr(self, "rbr_reparam"):
             return
         kernel, bias = self.get_equivalent_kernel_bias()
-        self.rbr_reparam = nn.Conv2d(in_channels=self.rbr_dense.conv.in_channels,
-                                     out_channels=self.rbr_dense.conv.out_channels,
-                                     kernel_size=self.rbr_dense.conv.kernel_size, stride=self.rbr_dense.conv.stride,
-                                     padding=self.rbr_dense.conv.padding, dilation=self.rbr_dense.conv.dilation,
-                                     groups=self.rbr_dense.conv.groups, bias=True)
+        self.rbr_reparam = nn.Conv2d(
+            in_channels=self.rbr_dense.conv.in_channels,
+            out_channels=self.rbr_dense.conv.out_channels,
+            kernel_size=self.rbr_dense.conv.kernel_size,
+            stride=self.rbr_dense.conv.stride,
+            padding=self.rbr_dense.conv.padding,
+            dilation=self.rbr_dense.conv.dilation,
+            groups=self.rbr_dense.conv.groups,
+            bias=True,
+        )
         self.rbr_reparam.weight.data = kernel
         self.rbr_reparam.bias.data = bias
-        self.__delattr__('rbr_dense')
-        self.__delattr__('rbr_3x3')
-        if hasattr(self, 'rbr_identity'):
-            self.__delattr__('rbr_identity')
-        if hasattr(self, 'id_tensor'):
-            self.__delattr__('id_tensor')
+        self.__delattr__("rbr_dense")
+        self.__delattr__("rbr_3x3")
+        if hasattr(self, "rbr_identity"):
+            self.__delattr__("rbr_identity")
+        if hasattr(self, "id_tensor"):
+            self.__delattr__("id_tensor")
         self.deploy = True
 
 
@@ -260,25 +369,58 @@ class repn33_se_center_concat(nn.Module):
         self.img_sz = self.feat_sz * self.stride
         # corner predict
         self.conv1_ctr = repN33(inplanes, channel)
-        self.conv2_ctr = conv_center_head(channel, channel // 2, )
-        self.conv3_ctr = conv_center_head(channel // 2, channel // 4, )
-        self.conv4_ctr = conv_center_head(channel // 4, channel // 8, )
+        self.conv2_ctr = conv_center_head(
+            channel,
+            channel // 2,
+        )
+        self.conv3_ctr = conv_center_head(
+            channel // 2,
+            channel // 4,
+        )
+        self.conv4_ctr = conv_center_head(
+            channel // 4,
+            channel // 8,
+        )
         self.conv5_ctr = nn.Conv2d(channel // 8, 1, kernel_size=1)
         self.se_ctr = SE(channel, reduction=4)
 
         # size regress
-        self.conv1_offset = repN33(inplanes, channel, )
-        self.conv2_offset = conv_center_head(channel, channel // 2, )
-        self.conv3_offset = conv_center_head(channel // 2, channel // 4, )
-        self.conv4_offset = conv_center_head(channel // 4, channel // 8, )
+        self.conv1_offset = repN33(
+            inplanes,
+            channel,
+        )
+        self.conv2_offset = conv_center_head(
+            channel,
+            channel // 2,
+        )
+        self.conv3_offset = conv_center_head(
+            channel // 2,
+            channel // 4,
+        )
+        self.conv4_offset = conv_center_head(
+            channel // 4,
+            channel // 8,
+        )
         self.conv5_offset = nn.Conv2d(channel // 8, 2, kernel_size=1)
         self.se_offset = SE(channel, reduction=4)
 
         # size regress
-        self.conv1_size = repN33(inplanes, channel, )
-        self.conv2_size = conv_center_head(channel, channel // 2, )
-        self.conv3_size = conv_center_head(channel // 2, channel // 4, )
-        self.conv4_size = conv_center_head(channel // 4, channel // 8, )
+        self.conv1_size = repN33(
+            inplanes,
+            channel,
+        )
+        self.conv2_size = conv_center_head(
+            channel,
+            channel // 2,
+        )
+        self.conv3_size = conv_center_head(
+            channel // 2,
+            channel // 4,
+        )
+        self.conv4_size = conv_center_head(
+            channel // 4,
+            channel // 8,
+        )
         self.conv5_size = nn.Conv2d(channel // 8, 2, kernel_size=1)
         self.se_size = SE(channel, reduction=4)
 
@@ -286,8 +428,13 @@ class repn33_se_center_concat(nn.Module):
             if p.dim() > 1:
                 nn.init.xavier_uniform_(p)
 
-    def forward(self, x, gt_score_map=None):
-        """ Forward pass with input x. """
+    def forward(self, x, gt_score_map=None, no_process=False):
+        """Forward pass with input x."""
+        if no_process:
+            score_map_ctr, size_map, offset_map = self.get_score_map(x, True)
+            out = {"score_map": score_map_ctr, "size_map": size_map, "offset_map": offset_map}
+            return out
+
         score_map_ctr, size_map, offset_map = self.get_score_map(x)
         # assert gt_score_map is None
         if gt_score_map is None:
@@ -295,10 +442,20 @@ class repn33_se_center_concat(nn.Module):
         else:
             bbox = self.cal_bbox(gt_score_map.unsqueeze(1), size_map, offset_map)
 
-        out = {'pred_boxes': bbox,
-               'score_map': score_map_ctr,
-               'size_map': size_map,
-               'offset_map': offset_map}
+        out = {"pred_boxes": bbox, "score_map": score_map_ctr, "size_map": size_map, "offset_map": offset_map}
+
+        return out
+
+    def forward_no_post_process(self, x, gt_score_map=None):
+        """Forward pass with input x."""
+        score_map_ctr, size_map, offset_map = self.get_score_map(x)
+        # assert gt_score_map is None
+        if gt_score_map is None:
+            bbox = self.cal_bbox(score_map_ctr, size_map, offset_map)
+        else:
+            bbox = self.cal_bbox(gt_score_map.unsqueeze(1), size_map, offset_map)
+
+        out = {"pred_boxes": bbox, "score_map": score_map_ctr, "size_map": size_map, "offset_map": offset_map}
 
         return out
 
@@ -311,9 +468,14 @@ class repn33_se_center_concat(nn.Module):
         size = size_map.flatten(2).gather(dim=2, index=idx)
         offset = offset_map.flatten(2).gather(dim=2, index=idx).squeeze(-1)
         # cx, cy, w, h
-        bbox = torch.cat([(idx_x.to(torch.float) + offset[:, :1]) / self.feat_sz,
-                          (idx_y.to(torch.float) + offset[:, 1:]) / self.feat_sz,
-                          size.squeeze(-1)], dim=1)
+        bbox = torch.cat(
+            [
+                (idx_x.to(torch.float) + offset[:, :1]) / self.feat_sz,
+                (idx_y.to(torch.float) + offset[:, 1:]) / self.feat_sz,
+                size.squeeze(-1),
+            ],
+            dim=1,
+        )
 
         if return_score:
             return bbox, max_score
@@ -330,7 +492,7 @@ class repn33_se_center_concat(nn.Module):
 
         return size * self.feat_sz, offset
 
-    def get_score_map(self, x):
+    def get_score_map(self, x, no_sigmoid=False):
 
         def _sigmoid(x):
             y = torch.clamp(x.sigmoid_(), min=1e-4, max=1 - 1e-4)
@@ -359,4 +521,6 @@ class repn33_se_center_concat(nn.Module):
         x_size3 = self.conv3_size(x_size2)
         x_size4 = self.conv4_size(x_size3)
         score_map_size = self.conv5_size(x_size4)
+        if no_sigmoid:
+            return score_map_ctr, score_map_size, score_map_offset
         return _sigmoid(score_map_ctr), _sigmoid(score_map_size), score_map_offset

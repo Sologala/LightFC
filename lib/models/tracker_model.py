@@ -48,3 +48,9 @@ class LightFC(nn.Module):
         opt = self.fusion(z_feat, x)
         out = self.head(opt)
         return out
+
+    def forward_tracking_export_onnx(self, z_feat, x):
+        x = self.backbone(x)
+        opt = self.fusion(z_feat, x)
+        out = self.head(opt, no_process=True)
+        return out
