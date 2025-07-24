@@ -35,6 +35,7 @@ class LightFC(nn.Module):
 
             out = self.head(opt)
         else:
+            z = self.backbone(z)
             return self.forward_tracking(z, x)
         return out
 
