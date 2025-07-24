@@ -29,3 +29,4 @@
 /external/draw
 /dev
 develop/x5m/model_output
+!lib/train/data_specs/
